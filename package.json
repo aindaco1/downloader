@@ -1,0 +1,28 @@
+{
+  "name": "dust-wave-downloader",
+  "version": "0.1.8",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:browser": "node tests/browser.mjs",
+    "test:youtube": "node tests/youtube-browser.mjs",
+    "icons": "node scripts/icons.mjs",
+    "test:vimeo": "node tests/vimeo-browser.mjs",
+    "test:errors": "node tests/errors-browser.mjs",
+    "test:rescan": "node tests/rescan-browser.mjs",
+    "test:toolbar": "node tests/toolbar-browser.mjs",
+    "test:nonmedia": "node tests/nonmedia-browser.mjs",
+    "fixtures": "node tests/fixtures.mjs",
+    "clean": "node scripts/clean.mjs"
+  },
+  "dependencies": {
+    "mediabunny": "1.61.0",
+    "mpd-parser": "1.4.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "playwright": "1.63.0"
+  }
+}

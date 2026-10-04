@@ -1,0 +1,24 @@
+# Installed dependencies and reproducible output
+/node_modules/
+/extension/
+/test-results/
+/tests/fixtures/
+/coverage/
+/dist/
+/outputs/
+/playwright-report/
+/blob-report/
+
+# Local configuration, credentials, and machine metadata
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.log
+.DS_Store
+._*
+.idea/
+.vscode/
