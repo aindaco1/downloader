@@ -1,4 +1,4 @@
-# Dust Wave Downloader 0.1.8
+# Dust Wave Downloader 0.1.10
 
 An unpacked Chrome extension for saving individual videos and original audio. It detects media automatically on websites, offers the qualities it can read, and combines tracks locally when needed. No account, native companion, server, or FFmpeg installation is required.
 
@@ -22,6 +22,23 @@ npm run build
 The same extension folder is designed for Chrome on macOS, Windows, and Linux. Browser tests were run on macOS; Windows and Linux have not been tested. Chrome on iPhone/Android is outside scope. Helium was also tested on macOS; other Chromium browsers have not been validated.
 
 To update, pull the latest source, run `npm ci` and `npm run build`, then click **Reload** on the extension's card in `chrome://extensions` and refresh open media pages. Keep the folder in place while installed.
+
+## Changes in 0.1.10
+
+- YouTube videos that expose only SABR or ciphered playback can now offer downloadable qualities through a public player lookup. The same fallback runs when observed YouTube sources cannot be inspected.
+- The lookup uses a fresh anonymous visitor context, then passes compatible direct tracks to the existing quality picker and local merging engine. No companion app, cookie export, new permission, or runtime dependency is needed.
+- Video identity follows YouTube navigation within the same tab, so the fallback also runs when the browser reports an older document URL.
+- The reported unlisted video passed complete 1080p video-with-audio and AAC audio-only downloads in Chromium, including full decode checks and popup closure during each download.
+
+This supports public/unlisted videos when YouTube provides compatible tracks. It is not a general SABR decoder or signature decipherer. Account-only, verification-gated, protected, and live videos remain outside this fallback. YouTube can change these player interfaces; see [VALIDATION.md](VALIDATION.md) for current evidence.
+
+## Changes in 0.1.9
+
+- YouTube SABR-only and cipher-only playback now shows a named video card with an explicit download limitation, instead of appearing as missing media. A later resolved source still enables quality inspection.
+- YouTube stream refusals no longer suggest that signing in or rescanning will fix unsupported downloading. Other sites keep their existing authentication guidance.
+- Rescan clears old card errors. Known unsupported playback does not advertise an available download on the toolbar or start the media engine.
+
+This update improves detection and error reporting; it does **not** add SABR or signature-deciphering support. A playable YouTube video can still be unavailable to this extension. Reload the extension and refresh open media pages after updating.
 
 ## Changes in 0.1.8
 
@@ -95,12 +112,12 @@ If media is missing, select the desired quality in the site's player, play it, a
 - Direct media files; finite HLS streams; clear, static DASH SegmentTemplate/SegmentTimeline/SegmentList streams.
 - Video/audio merging and audio extraction preserve encoded media. No transcoding, upscaling, MP3 conversion, batch downloads, playlists, or live recording.
 - AAC audio saves as M4A; MP3 stays MP3; Opus/Vorbis use Ogg; other supported codecs retain a compatible container. The selected output format is shown before download.
-- Protected media and some DASH SegmentBase layouts are unsupported. YouTube's SABR transport and cipher-only player responses are unsupported. YouTube support is experimental and is not a reason to rely on this build.
+- Protected media and some DASH SegmentBase layouts are unsupported. YouTube SABR/cipher-only pages use the public player fallback when compatible tracks are available. The fallback cannot access account-only or verification-gated videos, and YouTube support remains experimental.
 - Temporary output is streamed to Chrome's private disk storage, then handed to Chrome's download manager. Allow disk space for the temporary file and saved copy. Quitting Chrome interrupts assembly; restart the download from its page. There is no resumable queue.
 
 ## Privacy and permissions
 
-No analytics, upload service, remote executable code, cookie export, or native component. Network requests go to the visited sites and their media/image hosts. Source URLs and detected items live in a bounded Chrome session cache; closing a tab clears its items. Closing Chrome clears the session cache. Chrome retains its normal download history. Only the two settings persist in extension local storage.
+No analytics, upload service, remote executable code, cookie export, or native component. Network requests go to the visited sites and their media/image hosts. Source URLs and detected items live in a bounded Chrome session cache; closing a tab clears its items. Closing Chrome clears the session cache. Chrome retains its normal download history. Only the two settings persist in extension local storage. On **Choose quality**, eligible YouTube videos may trigger an anonymous watch-page and player lookup. Its visitor context stays in memory for that request and is never saved in extension storage. Returned media URLs use the existing bounded session cache.
 
 | Permission | Purpose |
 | --- | --- |
@@ -110,7 +127,7 @@ No analytics, upload service, remote executable code, cookie export, or native c
 | storage | Temporary discovery/jobs and persistent settings. |
 | offscreen | Inspect and assemble files after the popup closes. |
 | downloads | Save completed files, show progress, cancel, and reveal files. |
-| declarativeNetRequestWithHostAccess | Set the originating page's Referer only on extension-initiated media requests while inspecting/downloading. |
+| declarativeNetRequestWithHostAccess | Set the page Referer during extension media requests; temporarily set Origin and User-Agent only for the extension's YouTube player POST. Rules are removed when the operation finishes. |
 
 Automatic detection can be paused in Settings. Broad host access is still shown by Chrome because it is part of the installed manifest.
 
@@ -137,6 +154,8 @@ npm run test:toolbar
 npm run test:nonmedia
 ```
 
+For a full live YouTube check, run `YOUTUBE_TEST_URL="https://www.youtube.com/watch?v=VIDEO_ID" npm run test:youtube-live` with an authorized finite video. This saves the highest offered MP4 video and AAC audio into the test directory, checks their duration/codecs, and fully decodes both.
+
 Tests generate synthetic media, load the actual unpacked extension into a disposable Chromium profile, save files into `test-results`, and independently inspect/decode them. They do not alter your normal Chrome profile. `tests/live.mjs` checks public site samples; `DOWNLOADS=1` additionally downloads selected media into `test-results/live/downloads`. Live pages change and may show account or verification gates.
 
 Generated builds, synthetic fixtures, browser profiles, downloaded test media, and reports stay outside Git. Run `npm run clean` after testing to remove them; it retains `node_modules` for the next development session. If Chrome loads this repository's `extension` directory directly, rebuild before reloading the extension.
@@ -149,4 +168,4 @@ The icon artwork is in `assets/downloader-icon.png`. `npm run icons` regenerates
 
 ## Source and licenses
 
-Source is included in `src/` and `static/`. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The built extension includes full dependency license notices. Corresponding unmodified third-party source archives are provided in `third-party-source/`, including Mediabunny's MPL-2.0 source. Build tools are development dependencies only.
+The public YouTube client identity is based on the VISIONOS client described in [yt-dlp's YouTube extractor](https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/extractor/youtube/_base.py); no yt-dlp code or executable is bundled. Source is included in `src/` and `static/`. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The built extension includes full dependency license notices. Corresponding unmodified third-party source archives are provided in `third-party-source/`, including Mediabunny's MPL-2.0 source. Build tools are development dependencies only.

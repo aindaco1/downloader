@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSession, mediaRetryDelay } from '../src/engine.js';
+import { createSession, inspectMedia, mediaRetryDelay } from '../src/engine.js';
 import { Logging } from 'mediabunny';
 import { readableError } from '../src/core.js';
 
@@ -59,4 +59,23 @@ test('retry only transient failures, once; never retry denial, missing media or 
     assert.equal(mediaRetryDelay(2, error), null);
   }
   assert.equal(mediaRetryDelay(1, new DOMException('Cancelled', 'AbortError')), null);
+});
+
+test('YouTube denial survives inspection without misleading sign-in advice or private URLs', async t => {
+  let attempts = 0;
+  t.mock.method(globalThis, 'fetch', async () => { attempts++; return new Response(null, { status: 403 }); });
+  const signal = new AbortController().signal;
+  const url = 'https://r.googlevideo.com/videoplayback?itag=18&secret=private';
+  await assert.rejects(inspectMedia({ sources: [{ url, kind: 'file' }] }, signal), error => {
+    assert.match(error.message, /YouTube refused this stream/);
+    assert.doesNotMatch(error.message, /sign.?in|rescan|private|https:/i);
+    return true;
+  });
+  assert.equal(attempts, 1);
+  const session = createSession(signal);
+  await assert.rejects(session.fetch('https://notyoutube.com/video.mp4'), error => {
+    assert.match(readableError(error), /The site refused this request/);
+    return true;
+  });
+  session.dispose();
 });

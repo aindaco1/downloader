@@ -5,6 +5,8 @@ import {
 } from 'mediabunny';
 import { dashToHls } from './dash.js';
 import { httpUrl, readableError } from './core.js';
+import { isYoutubeMedia } from './youtube.js';
+import { boundedText } from './network.js';
 
 const formats = [...HLS_FORMATS, MP4, WEBM, MP3, OGG, WAVE, FLAC, ADTS];
 const classes = { mp4: Mp4OutputFormat, m4a: Mp4OutputFormat, webm: WebMOutputFormat, mkv: MkvOutputFormat, mp3: Mp3OutputFormat, ogg: OggOutputFormat, wav: WavOutputFormat, flac: FlacOutputFormat };
@@ -24,12 +26,6 @@ export function mediaRetryDelay(attempt, error) {
   // A denied or expired URL needs fresh page data, not the same request again.
   if (Number.isFinite(error?.status) && ![408, 429, 500, 502, 503, 504].includes(error.status)) return null;
   return 1;
-}
-
-async function boundedText(response) {
-  const reader = response.body.getReader(); let size = 0; let text = ''; const decoder = new TextDecoder();
-  try { while (true) { const { done, value } = await reader.read(); if (done) break; size += value.byteLength; if (size > 4000000) throw new Error('The manifest is too large.'); text += decoder.decode(value, { stream: true }); } return text + decoder.decode(); }
-  finally { await reader.cancel().catch(() => {}); }
 }
 
 export function createSession(signal, onBytes = () => {}) {
@@ -52,7 +48,10 @@ export function createSession(signal, onBytes = () => {}) {
     const response = await fetch(resource, { ...options, signal: combined, credentials: 'include' });
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
-      throw Object.assign(new Error(`The media server returned HTTP ${response.status}.`), { status: response.status });
+      throw Object.assign(new Error(`The media server returned HTTP ${response.status}.`), {
+        status: response.status,
+        code: [401, 403].includes(response.status) && isYoutubeMedia(url) ? 'YOUTUBE_REFUSED' : undefined,
+      });
     }
     if (!response.body) return response;
     const body = response.body.pipeThrough(new TransformStream({ transform(chunk, controller) { onBytes(chunk.byteLength); controller.enqueue(chunk); } }));

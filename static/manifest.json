@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Dust Wave Downloader",
-  "version": "0.1.8",
+  "version": "0.1.10",
   "description": "Find media on the current page, choose an available quality, and save video or original audio locally.",
   "minimum_chrome_version": "125",
   "permissions": [

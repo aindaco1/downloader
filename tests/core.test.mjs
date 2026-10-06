@@ -83,3 +83,31 @@ test('late YouTube metadata enriches observed streams without creating an empty 
   upsert(items, metadata, {});
   assert.equal(items.length, 1); assert.equal(items[0].title, 'Actual title'); assert.ok(items[0].thumbnail);
 });
+
+test('SABR-only YouTube playback is identified without claiming a downloadable file', () => {
+  const raw = youtubeMedia({ videoDetails: { videoId: '3HcahTc7kIk', title: 'A film' }, streamingData: {
+    adaptiveFormats: [{ itag: 137, mimeType: 'video/mp4' }], serverAbrStreamingUrl: 'https://r.googlevideo.com/videoplayback?sabr=1',
+  } })[0];
+  assert.equal(raw.unavailable, 'youtube-sabr');
+  assert.deepEqual(raw.sources, []);
+  const items = [];
+  upsert(items, raw, {});
+  assert.equal(items.length, 1);
+  assert.equal(items[0].unavailable, 'youtube-sabr');
+  upsert(items, { ...raw, sources: [{ url: 'https://manifest.googlevideo.com/movie.m3u8' }] }, {});
+  assert.equal(items.length, 1);
+  assert.equal(items[0].unavailable, undefined, 'late resolved sources remain inspectable');
+  upsert(items, raw, {});
+  assert.equal(items[0].unavailable, undefined, 'metadata must not hide observed sources');
+});
+
+test('cipher-only YouTube is distinguished from incomplete metadata and usable sources', () => {
+  const player = { videoDetails: { videoId: '3HcahTc7kIk' }, streamingData: { formats: [{ signatureCipher: 'unresolved' }] } };
+  assert.equal(youtubeMedia(player)[0].unavailable, 'youtube-cipher');
+  player.streamingData.hlsManifestUrl = 'https://manifest.googlevideo.com/movie.m3u8';
+  assert.equal(youtubeMedia(player)[0].unavailable, undefined);
+  const items = [];
+  upsert(items, { key: 'other:clip', sources: [], unavailable: 'youtube-sabr' }, {});
+  upsert(items, { key: 'youtube:3HcahTc7kIk', sources: [], unavailable: 'invented-message' }, {});
+  assert.deepEqual(items, [], 'arbitrary page messages cannot create unsupported cards');
+});

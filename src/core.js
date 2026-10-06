@@ -1,6 +1,12 @@
 export const MAX_ITEMS = 40;
 export const MAX_SOURCES = 24;
 
+export function unavailableMessage(reason) {
+  if (reason === 'youtube-sabr') return 'YouTube is using a playback format this version cannot download. Refreshing or rescanning will not add support for it.';
+  if (reason === 'youtube-cipher') return 'YouTube has not exposed a download link this version can read. Playback may still work normally.';
+  return '';
+}
+
 export function httpUrl(value, base) {
   if (typeof value !== 'string' || !value.trim() || value.length > 12000 || /[\x00-\x1f]/.test(value)) return null;
   try {
@@ -73,7 +79,8 @@ export function upsert(items, raw, context) {
   if (!raw || !Array.isArray(raw.sources)) return items;
   const sources = raw.sources.slice(0, MAX_SOURCES).map(cleanSource).filter(Boolean);
   const key = typeof raw.key === 'string' ? sourceUrl(raw.key) || raw.key.slice(0, 240) : sources[0]?.url;
-  if (!key || (!sources.length && !items.some(item => item.key === key))) return items;
+  const unavailable = /^youtube:[\w-]{11}$/.test(key || '') && unavailableMessage(raw.unavailable) ? raw.unavailable : null;
+  if (!key || (!sources.length && !unavailable && !items.some(item => item.key === key))) return items;
   const matches = items.filter(item => item.key === key || item.sources.some(a => sources.some(b => a.url === b.url)));
   const existing = matches[0];
   // A later site response can establish that separately observed tracks belong
@@ -94,6 +101,9 @@ export function upsert(items, raw, context) {
     if (known) Object.assign(known, source);
     else if (item.sources.length < MAX_SOURCES) item.sources.push(source);
   }
+  if (unavailable) item.unavailable = unavailable;
+  // Resolved player requests can arrive later. Keep those available for inspection.
+  if (item.sources.length) delete item.unavailable;
   item.pageUrl = context.pageUrl;
   if (!existing && items.length < MAX_ITEMS) items.push(item);
   return items;
@@ -119,8 +129,10 @@ export function sizeLabel(bytes) {
 }
 
 export function readableError(error) {
+  if (error?.code === 'YOUTUBE_LOOKUP') return error.message;
   const text = String(error?.message || error || 'Download failed');
   if (/abort|cancel/i.test(text)) return 'Cancelled.';
+  if (error?.code === 'YOUTUBE_REFUSED') return 'YouTube refused this stream. The video may play normally while downloading is unsupported by this version.';
   if (/403|401/i.test(text)) return 'The site refused this request. Play the item, rescan, and try again while signed in.';
   if (/failed to fetch|networkerror|load failed|timeout/i.test(text)) return 'The media server could not be reached. Check your connection, play the item again, and rescan.';
   if (/quota|disk|space/i.test(text)) return 'Browser storage is full. Free disk space and try again.';

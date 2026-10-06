@@ -9,6 +9,10 @@ export function youtubePageId(value) {
   if (!/(^|\.)(youtube\.com|youtube-nocookie\.com)$/.test(url.hostname)) return null;
   return validYoutubeId(url.searchParams.get('v') || url.pathname.match(/^\/(?:shorts|embed|live)\/([^/]+)/)?.[1]);
 }
+export function youtubeItemId(item) {
+  const id = youtubePageId(item?.pageUrl);
+  return id && item.key === `youtube:${id}` ? id : null;
+}
 export function isYoutubeMedia(value) {
   const safe = httpUrl(value);
   if (!safe) return false;

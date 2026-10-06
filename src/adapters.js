@@ -20,7 +20,8 @@ export function youtubeMedia(player) {
   if (!player?.videoDetails?.videoId) return [];
   const streaming = player.streamingData || {};
   const sources = [];
-  for (const format of [...(streaming.formats || []), ...(streaming.adaptiveFormats || [])]) {
+  const formats = [...(streaming.formats || []), ...(streaming.adaptiveFormats || [])];
+  for (const format of formats) {
     // Ciphered URLs are deliberately left to observed, resolved player requests.
     if (httpUrl(format.url)) sources.push({ url: format.url, kind: 'file', height: format.height, width: format.width, fps: format.fps, bitrate: format.bitrate, mime: format.mimeType, label: format.qualityLabel });
   }
@@ -28,7 +29,8 @@ export function youtubeMedia(player) {
     if (httpUrl(streaming[key])) sources.push({ url: streaming[key], kind });
   }
   const detail = player.videoDetails;
-  return [{ key: `youtube:${detail.videoId}`, title: detail.title, duration: Number(detail.lengthSeconds), thumbnail: detail.thumbnail?.thumbnails?.at(-1)?.url || youtubeThumbnail(detail.videoId), rank: 3, sources }];
+  const unavailable = !sources.length && (streaming.serverAbrStreamingUrl ? 'youtube-sabr' : formats.some(format => format.signatureCipher || format.cipher) ? 'youtube-cipher' : undefined);
+  return [{ key: `youtube:${detail.videoId}`, title: detail.title, duration: Number(detail.lengthSeconds), thumbnail: detail.thumbnail?.thumbnails?.at(-1)?.url || youtubeThumbnail(detail.videoId), rank: 3, sources, ...(unavailable ? { unavailable } : {}) }];
 }
 
 export function extractJsonMedia(root, context = {}) {

@@ -1,5 +1,6 @@
-import { durationLabel, sizeLabel } from './core.js';
+import { durationLabel, sizeLabel, unavailableMessage } from './core.js';
 import { pending, downloading } from './toolbar.js';
+import { youtubeItemId } from './youtube.js';
 const $ = selector => document.querySelector(selector);
 const create = (tag, className, text) => { const element = document.createElement(tag); if (className) element.className = className; if (text !== undefined) element.textContent = text; return element; };
 let tabId;
@@ -43,6 +44,8 @@ function select(label, options, value, change, className = '') {
   return element;
 }
 function card(item) {
+  const youtubePending = !item.sources.length && youtubeItemId(item);
+  const unavailable = !item.sources.length && !youtubePending && unavailableMessage(item.unavailable);
   const article = create('article', 'media-card'); article.dataset.item = item.id;
   const thumb = create('div', 'thumbnail'); thumb.append(create('span', 'symbol', '▷'));
   if (item.thumbnail) { const image = create('img'); image.src = item.thumbnail; image.alt = ''; image.referrerPolicy = 'no-referrer'; image.loading = 'lazy'; image.onerror = () => image.remove(); thumb.append(image); }
@@ -50,7 +53,7 @@ function card(item) {
   article.append(thumb);
   const body = create('div', 'card-body');
   const heading = create('div', 'card-heading'); const title = create('h2', 'title');
-  title.append(create('span', 'tag', [...new Set(item.sources.map(source => source.kind === 'file' ? 'FILE' : source.kind.toUpperCase()))].join(' / ')), document.createTextNode(item.title));
+  title.append(create('span', 'tag', youtubePending || unavailable ? 'YOUTUBE' : [...new Set(item.sources.map(source => source.kind === 'file' ? 'FILE' : source.kind.toUpperCase()))].join(' / ')), document.createTextNode(item.title));
   heading.append(title, button('×', 'dismiss', async () => { await rpc('dismiss', { itemId: item.id }); await refresh(true); }, 'Dismiss item'));
   body.append(heading);
   const inspection = item.inspection;
@@ -58,7 +61,7 @@ function card(item) {
   const previous = picks.get(item.id);
   const chosen = choices.find(choice => choice.id === previous) || choices[0];
   if (chosen) picks.set(item.id, chosen.id);
-  const detail = create('p', 'detail', chosen ? `${chosen.extension.toUpperCase()}${chosen.audioCodec ? ` · ${chosen.audioCodec.toUpperCase()} audio` : chosen.type === 'video' ? ' · Video only' : ' · Original audio'}${chosen.duration ? ` · ${durationLabel(chosen.duration)}` : ''}` : `${item.sources.length} source${item.sources.length === 1 ? '' : 's'} detected`);
+  const detail = create('p', 'detail', youtubePending ? 'Choose a quality to check available downloads' : unavailable ? 'Playback detected · Download unavailable' : chosen ? `${chosen.extension.toUpperCase()}${chosen.audioCodec ? ` · ${chosen.audioCodec.toUpperCase()} audio` : chosen.type === 'video' ? ' · Video only' : ' · Original audio'}${chosen.duration ? ` · ${durationLabel(chosen.duration)}` : ''}` : `${item.sources.length} source${item.sources.length === 1 ? '' : 's'} detected`);
   body.append(detail);
   if (renamed.has(item.id)) {
     const filename = create('input', 'filename'); filename.value = names.get(item.id) || item.title; filename.maxLength = 140; filename.setAttribute('aria-label', 'Filename'); filename.addEventListener('input', () => names.set(item.id, filename.value)); body.append(filename);
@@ -74,7 +77,7 @@ function card(item) {
       if (result.job.status === 'error') throw new Error(result.job.error);
       view = 'jobs'; await refresh(true);
     }); download.disabled = busy || snapshot.jobs.some(pending); controls.append(download);
-  } else {
+  } else if (!unavailable) {
     const inspect = button(busy && messages.get(item.id) === 'Reading available qualities…' ? 'Reading…' : 'Choose quality', 'download inspect', async () => {
       if (busy) return;
       busy = true; status(); messages.set(item.id, 'Reading available qualities…'); render(true);
@@ -84,6 +87,7 @@ function card(item) {
     }); inspect.disabled = busy; controls.append(inspect);
   }
   body.append(controls);
+  if (unavailable) body.append(create('p', 'card-status error', unavailable));
   if (messages.has(item.id)) body.append(create('p', `card-status${busy ? '' : ' error'}`, messages.get(item.id)));
   if (inspection?.warnings?.length) body.append(create('p', 'card-status', 'Some sources could not be read. The choices above are available.'));
   article.append(body); return article;
@@ -154,7 +158,7 @@ function render(force = false) {
 async function refresh(force = false) { snapshot = await rpc('snapshot'); render(force); }
 $('#mediaTab').onclick = () => { view = 'media'; render(true); };
 $('#jobsTab').onclick = () => { view = 'jobs'; render(true); };
-$('#rescan').onclick = async () => { try { await rpc('rescan'); status('Rescanned. Play the media if no new sources appear.'); setTimeout(() => void refresh(true), 900); } catch (error) { status(error.message); } };
+$('#rescan').onclick = async () => { try { await rpc('rescan'); messages.clear(); status('Rescanned.'); await refresh(true); setTimeout(() => void refresh(true), 900); } catch (error) { status(error.message); } };
 $('#settingsButton').onclick = () => { $('#automatic').checked = snapshot.settings.automatic; $('#saveAs').checked = snapshot.settings.saveAs; $('#settingsDialog').showModal(); };
 $('#helpButton').onclick = () => $('#helpDialog').showModal();
 $('#saveSettings').onclick = async () => { try { await rpc('settings', { settings: { automatic: $('#automatic').checked, saveAs: $('#saveAs').checked } }); $('#settingsDialog').close(); await refresh(true); } catch (error) { status(error.message); } };

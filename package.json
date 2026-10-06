@@ -1,6 +1,6 @@
 {
   "name": "dust-wave-downloader",
-  "version": "0.1.8",
+  "version": "0.1.10",
   "private": true,
   "type": "module",
   "scripts": {
@@ -15,7 +15,8 @@
     "test:toolbar": "node tests/toolbar-browser.mjs",
     "test:nonmedia": "node tests/nonmedia-browser.mjs",
     "fixtures": "node tests/fixtures.mjs",
-    "clean": "node scripts/clean.mjs"
+    "clean": "node scripts/clean.mjs",
+    "test:youtube-live": "node tests/youtube-live.mjs"
   },
   "dependencies": {
     "mediabunny": "1.61.0",

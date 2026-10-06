@@ -1,6 +1,8 @@
-import { httpUrl, mediaKind, sourceUrl, upsert, safeFilename, readableError } from './core.js';
+import { httpUrl, mediaKind, sourceUrl, upsert, safeFilename, readableError, unavailableMessage } from './core.js';
 import { siteContext, withSiteContext } from './site-context.js';
 import { createToolbarActivity, pending } from './toolbar.js';
+import { youtubeItemId } from './youtube.js';
+import { resolveYoutube, youtubePlayerRule } from './youtube-resolver.js';
 
 const state = { tabs: {}, jobs: [], settings: { automatic: true, saveAs: false } };
 let inspection = false;
@@ -8,7 +10,7 @@ let creating;
 let saveTimer;
 let activeTabId;
 const toolbar = createToolbarActivity();
-const updateToolbar = detected => toolbar.update({ job: activeJob(), detected, count: state.tabs[activeTabId]?.items.length || 0 });
+const updateToolbar = detected => toolbar.update({ job: activeJob(), detected, count: state.tabs[activeTabId]?.items.filter(item => item.sources.length || youtubeItemId(item)).length || 0 });
 const showActiveToolbar = () => updateToolbar(Boolean(state.tabs[activeTabId]?.items.length));
 const manualScans = new Map();
 const loaded = Promise.all([chrome.storage.session.get('state'), chrome.storage.local.get('settings')]).then(async ([saved, settings]) => {
@@ -53,7 +55,7 @@ async function release(id) {
 
 async function requestContext(pageUrl) {
   const safe = httpUrl(pageUrl);
-  await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [1], addRules: safe ? [{
+  await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [1, 2], addRules: safe ? [{
     id: 1, priority: 1,
     action: { type: 'modifyHeaders', requestHeaders: [{ header: 'Referer', operation: 'set', value: safe }] },
     condition: { initiatorDomains: [chrome.runtime.id], urlFilter: '|http', resourceTypes: ['xmlhttprequest', 'media', 'other'] },
@@ -123,7 +125,10 @@ async function handle(message, sender) {
   if (message.type === 'discover') {
     if (sender.id !== chrome.runtime.id || !sender.tab || (!state.settings.automatic && (manualScans.get(sender.tab.id) || 0) < Date.now()) || !httpUrl(sender.url) || !Array.isArray(message.items)) return {};
     const tab = tabState(sender.tab.id);
-    const pageUrl = httpUrl(sender.url);
+    // sender.url can retain the document's initial URL after pushState. The
+    // detector reports its current location; accept changes within that origin.
+    const reportedUrl = httpUrl(message.pageUrl);
+    const pageUrl = reportedUrl && new URL(reportedUrl).origin === new URL(sender.url).origin ? reportedUrl : httpUrl(sender.url);
     tab.frames[sender.frameId] = pageUrl;
     if (!sender.frameId) {
       if ((tab.pageUrl && tab.pageUrl !== pageUrl) || (tab.documentId && tab.documentId !== sender.documentId)) tab.items = [];
@@ -180,11 +185,31 @@ async function handle(message, sender) {
     case 'inspect': {
       if (inspection || activeJob()) throw new Error('Finish or cancel the current media task first.');
       const item = currentItem(message.tabId, message.itemId);
+      const youtubeId = youtubeItemId(item);
+      if (!youtubeId && !item.sources.length && unavailableMessage(item.unavailable)) throw new Error(unavailableMessage(item.unavailable));
       if (item.inspection && Date.now() - item.inspection.at < 300000) return item.inspection;
       inspection = true;
       try {
         await requestContext(item.pageUrl);
-        const result = await engineMessage({ type: 'inspect', media: item });
+        let result; let candidate = item;
+        if (item.sources.length) {
+          try { result = await engineMessage({ type: 'inspect', media: item }); }
+          catch (error) {
+            if (!youtubeId || /protected|live recording|cancel/i.test(error.message)) throw error;
+          }
+        }
+        if (!result && youtubeId) {
+          let sources;
+          await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [2], addRules: [youtubePlayerRule(chrome.runtime.id)] });
+          try { sources = await resolveYoutube(youtubeId); }
+          finally { await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [2] }); }
+          candidate = { ...item, sources };
+          result = await engineMessage({ type: 'inspect', media: candidate });
+        }
+        if (!result) throw new Error('No downloadable sources were found.');
+        if (currentItem(message.tabId, message.itemId) !== item) throw new Error('The page changed. Choose the video again.');
+        item.sources = candidate.sources;
+        delete item.unavailable;
         item.inspection = { choices: result.choices, warnings: result.warnings, at: Date.now() };
         await persist();
         return item.inspection;
