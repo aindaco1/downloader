@@ -35,13 +35,26 @@ export function youtubeMedia(player) {
 
 export function extractJsonMedia(root, context = {}) {
   const output = [];
-  const stack = [[root, 0]];
+  const page = httpUrl(context.pageUrl);
+  const pageUrl = page ? new URL(page) : null;
+  const substackSlug = pageUrl && /(^|\.)substack\.com$/.test(pageUrl.hostname) ? pageUrl.pathname.match(/^\/p\/([^/]+)\/?$/)?.[1] : null;
+  const postMetadata = post => ({ postId: String(post.id), title: post.title, thumbnail: httpUrl(post.cover_image) || httpUrl(post.podcast_art_url) });
+  const currentPost = substackSlug && context.post?.slug === substackSlug ? postMetadata(context.post) : null;
+  const stack = [[root, 0, currentPost]];
   const seen = new Set();
   let visited = 0;
   while (stack.length && visited++ < 18000 && output.length < 40) {
-    const [node, depth] = stack.pop();
+    const [node, depth, inheritedPost] = stack.pop();
     if (!node || typeof node !== 'object' || seen.has(node) || depth > 18) continue;
     seen.add(node);
+    let post = inheritedPost;
+    // Substack prefetches recommended posts with their own read-aloud tracks.
+    // Keep the current article's subtree and carry its metadata to nested media.
+    if (substackSlug && node.id && node.publication_id && typeof node.slug === 'string') {
+      if (node.slug !== substackSlug) continue;
+      post = postMetadata(node);
+    }
+    if (substackSlug && node.post_id && String(node.post_id) !== post?.postId) continue;
     if (node.streamingData && node.videoDetails) output.push(...youtubeMedia(node));
     if (Array.isArray(node.video_versions)) {
       output.push({ key: `instagram:${node.pk || node.id || node.code || node.video_versions[0]?.url}`, title: node.caption?.text || node.accessibility_caption || context.title, thumbnail: node.image_versions2?.candidates?.[0]?.url, duration: node.video_duration, rank: 3,
@@ -71,10 +84,11 @@ export function extractJsonMedia(root, context = {}) {
     }
     for (const key of ['contentUrl', 'audio_url', 'audioUrl', 'video_url', 'videoUrl', 'hls_url', 'hlsUrl']) {
       const url = node[key];
-      if (httpUrl(url) && mediaKind(url)) output.push({ title: node.name || node.title || context.title, thumbnail: firstUrl(node.thumbnailUrl), sources: [{ url, kind: mediaKind(url) }], rank: 2 });
+      const title = node.name || node.title || post?.title || context.title;
+      if (httpUrl(url) && mediaKind(url)) output.push({ title: post && node.type === 'tts' ? `${title} (read aloud)` : title, thumbnail: firstUrl(node.thumbnailUrl) || post?.thumbnail, sources: [{ url, kind: mediaKind(url) }], rank: 2 });
     }
-    if (Array.isArray(node)) for (const child of node.slice(0, 1500)) stack.push([child, depth + 1]);
-    else for (const child of Object.values(node)) if (child && typeof child === 'object') stack.push([child, depth + 1]);
+    if (Array.isArray(node)) for (const child of node.slice(0, 1500)) stack.push([child, depth + 1, post]);
+    else for (const child of Object.values(node)) if (child && typeof child === 'object') stack.push([child, depth + 1, post]);
   }
   return output;
 }

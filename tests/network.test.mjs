@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createSession, inspectMedia, mediaRetryDelay } from '../src/engine.js';
-import { Logging } from 'mediabunny';
+import { EncodedPacketSink, Logging } from 'mediabunny';
 import { readableError } from '../src/core.js';
 
 test('retry diagnostics stay out of error logs without hiding unexpected library errors', t => {
@@ -23,6 +23,16 @@ test('retry diagnostics stay out of error logs without hiding unexpected library
 test('network failures do not claim the server refused access', () => {
   assert.match(readableError(new TypeError('Failed to fetch')), /could not be reached/);
   assert.match(readableError(new Error('HTTP 403')), /site refused/);
+});
+
+test('only explicit user cancellation is labeled Cancelled; interrupted requests and timeouts keep their causes', () => {
+  assert.equal(readableError(Object.assign(new Error('cancel'), { code: 'USER_CANCELLED' })), 'Cancelled.');
+  assert.equal(readableError(new Error('Cancelled.')), 'Cancelled.', 'serialized cancellation remains stable');
+  assert.match(readableError(new DOMException('The operation was aborted.', 'AbortError')), /request was interrupted/);
+  assert.match(readableError(new DOMException('signal timed out', 'TimeoutError')), /request timed out/);
+  assert.match(readableError(new Error('Inspection timed out. Play the media and try again.')), /request timed out/);
+  const redacted = readableError(new Error('Could not parse https://cdn.example/aborted.mp4?token=403'));
+  assert.equal(redacted, 'Could not parse [media URL]');
 });
 
 test('fetch complete HLS playlists but preserve byte ranges for media segments', async t => {
@@ -51,6 +61,35 @@ test('HTTP refusal status survives fetch without retaining its signed URL', asyn
     return true;
   });
   assert.ok(cancelled);
+});
+
+test('YouTube bounded requests preserve the signed URL and read every packet across response boundaries', async t => {
+  const size = 12 * 1024 * 1024;
+  const wave = Buffer.alloc(44 + size, 42);
+  wave.write('RIFF', 0); wave.writeUInt32LE(36 + size, 4); wave.write('WAVEfmt ', 8);
+  wave.writeUInt32LE(16, 16); wave.writeUInt16LE(1, 20); wave.writeUInt16LE(1, 22);
+  wave.writeUInt32LE(48000, 24); wave.writeUInt32LE(96000, 28);
+  wave.writeUInt16LE(2, 32); wave.writeUInt16LE(16, 34); wave.write('data', 36); wave.writeUInt32LE(size, 40);
+  const url = 'https://r.googlevideo.com/videoplayback?itag=140&signature=keep';
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (resource, options) => {
+    assert.equal(resource, url);
+    const range = /^bytes=(\d+)-(\d+)$/.exec(new Headers(options.headers).get('range'));
+    assert.ok(range, 'open-ended reads are bounded');
+    const start = Number(range[1]); const end = Math.min(Number(range[2]), wave.length - 1);
+    assert.ok(end - start < 10 * 1024 * 1024);
+    requests.push({ start, end });
+    return new Response(wave.subarray(start, end + 1), { status: 206, headers: { 'Content-Range': `bytes ${start}-${end}/${wave.length}`, 'Content-Length': String(end - start + 1) } });
+  });
+  const session = createSession(new AbortController().signal);
+  try {
+    const input = await session.open({ url, kind: 'file' });
+    const track = await input.getPrimaryAudioTrack();
+    const packets = [];
+    for await (const packet of new EncodedPacketSink(track).packets()) packets.push(packet.data);
+    assert.deepEqual(Buffer.concat(packets), wave.subarray(44), 'all original audio bytes survive chunk boundaries');
+    assert.ok(requests.length > 1 && requests.some(request => request.start >= 10 * 1024 * 1024));
+  } finally { session.dispose(); }
 });
 test('retry only transient failures, once; never retry denial, missing media or cancellation', () => {
   for (const status of [400, 401, 403, 404, 410, 416, 451, 501]) assert.equal(mediaRetryDelay(1, { status }), null);

@@ -5,7 +5,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { startServer } from './server.mjs';
 
-const root = path.resolve('test-results');
+const root = path.resolve(process.env.RESULTS_DIR || 'test-results');
 await mkdir(path.join(root, 'downloads'), { recursive: true });
 const { server, base, requests } = await startServer();
 const extension = path.resolve('extension');
@@ -14,7 +14,7 @@ const errors = [];
 const profile = path.join(root, `profile-${Date.now()}`);
 await mkdir(path.join(profile, 'Default'), { recursive: true });
 await writeFile(path.join(profile, 'Default', 'Preferences'), JSON.stringify({ download: { default_directory: path.join(root, 'downloads'), prompt_for_download: false, directory_upgrade: true } }));
-const context = await chromium.launchPersistentContext(profile, { channel: 'chromium', headless: true, args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`], acceptDownloads: true });
+const context = await chromium.launchPersistentContext(profile, { channel: 'chromium', executablePath: process.env.CHROMIUM_EXECUTABLE, headless: true, ignoreDefaultArgs: ['--disable-extensions'], args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`], acceptDownloads: true });
 context.on('page', page => page.on('pageerror', error => errors.push(error.message)));
 const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
 const extensionId = worker.url().split('/')[2];

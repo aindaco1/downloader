@@ -4,9 +4,11 @@ import {
   Mp3OutputFormat, OggOutputFormat, WavOutputFormat, FlacOutputFormat, Conversion, EncodedPacketSink, Logging, LogLevel,
 } from 'mediabunny';
 import { dashToHls } from './dash.js';
-import { httpUrl, readableError } from './core.js';
+import { httpUrl, readableError, sizeLabel } from './core.js';
 import { isYoutubeMedia } from './youtube.js';
 import { boundedText } from './network.js';
+import { driveDownloadId, driveExtension } from './drive.js';
+import { fetchDriveDownload } from './drive-download.js';
 
 const formats = [...HLS_FORMATS, MP4, WEBM, MP3, OGG, WAVE, FLAC, ADTS];
 const classes = { mp4: Mp4OutputFormat, m4a: Mp4OutputFormat, webm: WebMOutputFormat, mkv: MkvOutputFormat, mp3: Mp3OutputFormat, ogg: OggOutputFormat, wav: WavOutputFormat, flac: FlacOutputFormat };
@@ -32,6 +34,8 @@ export function createSession(signal, onBytes = () => {}) {
   const inputs = [];
   const virtualFiles = new Map();
   const playlists = new Set();
+  const driveUrls = new Map();
+  let driveNotice = '';
   async function fetchMedia(resource, options = {}) {
     signal.throwIfAborted();
     const url = resource instanceof Request ? resource.url : String(resource);
@@ -44,8 +48,25 @@ export function createSession(signal, onBytes = () => {}) {
       headers.delete('range');
       options = { ...options, headers };
     }
-    const combined = AbortSignal.any([signal, ...(options.signal ? [options.signal] : []), AbortSignal.timeout(90000)]);
-    const response = await fetch(resource, { ...options, signal: combined, credentials: 'include' });
+    // YouTube throttles long open-ended transfers. UrlSource resumes bounded
+    // responses using Content-Range, without changing the signed source URL.
+    const parsed = new URL(url);
+    if (/(^|\.)googlevideo\.com$/.test(parsed.hostname) && parsed.pathname === '/videoplayback') {
+      const headers = new Headers(options.headers ?? (resource instanceof Request ? resource.headers : undefined));
+      const range = /^bytes=(\d+)-$/.exec(headers.get('range') || '');
+      if (range) {
+        headers.set('range', `bytes=${range[1]}-${Number(range[1]) + 10 * 1024 * 1024 - 1}`);
+        options = { ...options, headers };
+      }
+    }
+    const drive = driveDownloadId(url);
+    const combined = AbortSignal.any([signal, ...(options.signal ? [options.signal] : []), ...(drive ? [] : [AbortSignal.timeout(90000)])]);
+    let response;
+    if (drive) {
+      const resolved = await fetchDriveDownload(driveUrls.get(url) || url, { ...options, signal: combined });
+      driveUrls.set(url, resolved.url); driveNotice ||= resolved.notice;
+      response = resolved.response;
+    } else response = await fetch(resource, { ...options, signal: combined, credentials: 'include' });
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
       throw Object.assign(new Error(`The media server returned HTTP ${response.status}.`), {
@@ -61,6 +82,7 @@ export function createSession(signal, onBytes = () => {}) {
   }
   return {
     inputs,
+    get driveNotice() { return driveNotice; },
     fetch: fetchMedia,
     async open(source) {
       let url = source.url;
@@ -100,6 +122,16 @@ export async function inspectMedia(media, signal) {
   const session = createSession(signal);
   const tracks = []; const warnings = [];
   try {
+    const original = media.sources.find(source => driveDownloadId(source.url) && driveExtension(source.mime, media.title));
+    if (original) {
+      // Drive's original download is not a playback rendition. Offer the exact
+      // file without requiring its container/codecs to support remuxing.
+      const response = await session.fetch(original.url, { headers: { Range: 'bytes=0-0' } });
+      const size = Number(response.headers.get('content-range')?.split('/').at(-1) || response.headers.get('content-length') || original.size);
+      await response.body?.cancel();
+      const extension = driveExtension(original.mime, media.title);
+      return { choices: [{ id: '0', type: original.mime.startsWith('audio/') ? 'audio' : 'video', original: true, extension, directUrl: original.url, label: `Original file · ${extension.toUpperCase()}${size > 0 ? ` · ${sizeLabel(size)}` : ''}` }], warnings: [], notice: session.driveNotice };
+    }
     for (const [sourceIndex, source] of media.sources.entries()) {
       signal.throwIfAborted();
       try {

@@ -35,6 +35,7 @@ try {
   await popup.goto(popupUrl);
   const snapshot = () => popup.evaluate(tabId => chrome.runtime.sendMessage({ type: 'snapshot', tabId }), tabId);
   const item = await waitFor(async () => (await snapshot()).tab.items.find(item => item.key === `youtube:${youtubePageId(url)}`), 'YouTube item was not detected');
+  await page.locator('video').evaluateAll(elements => elements.forEach(video => video.pause()));
   result.discovery = { sourceCount: item.sources.length, playback: item.unavailable || 'observed sources' };
   console.log('LIVE DISCOVERY', JSON.stringify(result.discovery));
   await popup.getByRole('button', { name: 'Choose quality' }).click();
@@ -44,13 +45,15 @@ try {
     if (error) throw new Error(error);
     return current?.inspection ? current : null;
   }, 'Quality inspection did not finish', 180);
-  result.choices = inspected.inspection.choices.map(({ type, label, height, extension }) => ({ type, label, height, extension }));
+  result.choices = inspected.inspection.choices.map(({ type, label, width, height, extension, codec, audioCodec }) => ({ type, label, width, height, extension, codec, audioCodec }));
   assert.ok(result.choices.some(choice => choice.type === 'video'));
   assert.ok(result.choices.some(choice => choice.type === 'audio'));
   assert.deepEqual(await worker.evaluate(() => chrome.declarativeNetRequest.getSessionRules()), [], 'temporary request rules were removed');
   console.log('LIVE CHOICES', JSON.stringify(result.choices));
   await popup.locator('body').screenshot({ path: path.join(root, 'qualities.png') });
-  for (const type of ['video', 'audio']) {
+  const mediaTypes = process.env.INSPECT_ONLY === '1' ? [] : (process.env.MEDIA_TYPES || 'video,audio').split(',');
+  assert.ok(mediaTypes.every(type => ['video', 'audio'].includes(type)), 'MEDIA_TYPES must contain video and/or audio');
+  for (const type of mediaTypes) {
     const choices = inspected.inspection.choices.filter(choice => choice.type === type);
     const choice = type === 'video' ? choices.find(choice => choice.audioCodec && choice.extension === 'mp4') || choices[0] : choices.find(choice => choice.extension === 'm4a') || choices[0];
     const started = await popup.evaluate(data => chrome.runtime.sendMessage({ type: 'start', ...data }), { tabId, itemId: item.id, choiceId: choice.id, filename: `youtube-${type}` });

@@ -2,6 +2,7 @@ export const MAX_ITEMS = 40;
 export const MAX_SOURCES = 24;
 
 export function unavailableMessage(reason) {
+  if (reason === 'youtube-preview') return 'YouTube has exposed a video preview. Choose a quality to check available downloads.';
   if (reason === 'youtube-sabr') return 'YouTube is using a playback format this version cannot download. Refreshing or rescanning will not add support for it.';
   if (reason === 'youtube-cipher') return 'YouTube has not exposed a download link this version can read. Playback may still work normally.';
   return '';
@@ -38,7 +39,10 @@ export function mediaKind(raw, mime = '') {
 function playerAsset(url) {
   const parsed = new URL(url);
   return (/(^|\.)youtube\.com$/.test(parsed.hostname) && parsed.pathname.startsWith('/s/')) ||
-    (/(^|\.)(tiktokcdn|tiktokcdn-us)\.com$/.test(parsed.hostname) && parsed.pathname.includes('/tiktok/webapp/'));
+    (/(^|\.)(tiktokcdn|tiktokcdn-us)\.com$/.test(parsed.hostname) && parsed.pathname.includes('/tiktok/webapp/')) ||
+    // X's HLS EXT-X-MAP files contain initialization metadata, not a video or
+    // audio download. The parent playlist already supplies these to the engine.
+    (parsed.hostname === 'video.twimg.com' && /^\/(?:amplify_video|ext_tw_video)\/\d+\/(?:pu\/)?(?:vid|aud)\/[^/]+\/0\/0\/.+\.mp4$/i.test(parsed.pathname));
 }
 
 export function sourceUrl(value) {
@@ -75,13 +79,30 @@ export function cleanSource(raw) {
   return result;
 }
 
+function sourceGroup(sources) {
+  // X serves the master, video qualities and audio playlists under one media
+  // ID. A post/page title is not an identity: it may contain several clips.
+  const keys = sources.map(source => {
+    const safe = httpUrl(source.url);
+    if (!safe) return null;
+    const url = new URL(safe);
+    if (url.hostname !== 'video.twimg.com') return null;
+    const video = url.pathname.match(/^\/(amplify_video|ext_tw_video)\/(\d+)\/(?:pu\/)?(?:pl|vid)\/.+\.(?:m3u8|mp4)$/i);
+    if (video) return `twitter:${video[1]}:${video[2]}`;
+    const clip = url.pathname.match(/^\/tweet_video\/([\w-]+)\.mp4$/);
+    return clip ? `twitter:tweet_video:${clip[1]}` : null;
+  });
+  return keys.length && keys[0] && keys.every(key => key === keys[0]) ? keys[0] : null;
+}
+
 export function upsert(items, raw, context) {
   if (!raw || !Array.isArray(raw.sources)) return items;
   const sources = raw.sources.slice(0, MAX_SOURCES).map(cleanSource).filter(Boolean);
-  const key = typeof raw.key === 'string' ? sourceUrl(raw.key) || raw.key.slice(0, 240) : sources[0]?.url;
+  const group = sourceGroup(sources);
+  const key = group || (typeof raw.key === 'string' ? sourceUrl(raw.key) || raw.key.slice(0, 240) : sources[0]?.url);
   const unavailable = /^youtube:[\w-]{11}$/.test(key || '') && unavailableMessage(raw.unavailable) ? raw.unavailable : null;
   if (!key || (!sources.length && !unavailable && !items.some(item => item.key === key))) return items;
-  const matches = items.filter(item => item.key === key || item.sources.some(a => sources.some(b => a.url === b.url)));
+  const matches = items.filter(item => item.key === key || (group && sourceGroup(item.sources) === group) || item.sources.some(a => sources.some(b => a.url === b.url)));
   const existing = matches[0];
   // A later site response can establish that separately observed tracks belong
   // together. Collapse those cards while retaining their discovered sources.
@@ -92,7 +113,7 @@ export function upsert(items, raw, context) {
   const title = typeof raw.title === 'string' ? raw.title.trim().slice(0, 200) : '';
   const item = existing || { id: idFor(key), key, sources: [], title: context.title || 'Media on this page', pageUrl: context.pageUrl, rank: 0 };
   const rank = Math.min(3, Number(raw.rank) || 0);
-  if (existing && raw.key && (rank > item.rank || (httpUrl(item.key) && !httpUrl(key)))) item.key = key;
+  if (existing && (raw.key || group) && (rank > item.rank || (httpUrl(item.key) && !httpUrl(key)))) item.key = key;
   if (title && rank >= item.rank) { item.title = title; item.rank = rank; }
   if (httpUrl(raw.thumbnail)) item.thumbnail = raw.thumbnail;
   if (number(raw.duration)) item.duration = number(raw.duration);
@@ -111,7 +132,7 @@ export function upsert(items, raw, context) {
 
 export function safeFilename(value, extension = '') {
   let name = String(value || 'Media').normalize('NFC').replace(/[\x00-\x1f<>:"/\\|?*]/g, '-').replace(/[. ]+$/g, '').trim();
-  name = name.replace(/\.(mp4|m4a|webm|mkv|mp3|aac|ogg|opus|wav|flac)$/i, '');
+  name = name.replace(/\.(mp4|m4v|mov|m4a|webm|mkv|mp3|aac|ogg|opus|wav|flac)$/i, '');
   if (!name || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name)) name = `Media-${name || 'download'}`;
   return name.slice(0, 140) + (extension ? `.${extension}` : '');
 }
@@ -129,13 +150,15 @@ export function sizeLabel(bytes) {
 }
 
 export function readableError(error) {
-  if (error?.code === 'YOUTUBE_LOOKUP') return error.message;
-  const text = String(error?.message || error || 'Download failed');
-  if (/abort|cancel/i.test(text)) return 'Cancelled.';
+  if (['YOUTUBE_LOOKUP', 'DRIVE_DOWNLOAD'].includes(error?.code)) return error.message;
+  const text = String(error?.message || error || 'Download failed').replace(/https?:\/\/\S+/g, '[media URL]');
+  if (error?.code === 'USER_CANCELLED' || text === 'Cancelled.') return 'Cancelled.';
   if (error?.code === 'YOUTUBE_REFUSED') return 'YouTube refused this stream. The video may play normally while downloading is unsupported by this version.';
+  if (error?.name === 'TimeoutError' || /timed?\s*out|timeout/i.test(text)) return 'The media request timed out. Try choosing a quality again.';
+  if (error?.name === 'AbortError' || /\b(abort(?:ed)?|cancelled|canceled)\b/i.test(text)) return 'The media request was interrupted. Try choosing a quality again.';
   if (/403|401/i.test(text)) return 'The site refused this request. Play the item, rescan, and try again while signed in.';
   if (/failed to fetch|networkerror|load failed|timeout/i.test(text)) return 'The media server could not be reached. Check your connection, play the item again, and rescan.';
   if (/quota|disk|space/i.test(text)) return 'Browser storage is full. Free disk space and try again.';
   if (/DRM|encrypted|decryption/i.test(text)) return 'This protected stream cannot be downloaded.';
-  return text.replace(/https?:\/\/\S+/g, '[media URL]').slice(0, 280);
+  return text.slice(0, 280);
 }

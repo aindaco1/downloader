@@ -61,7 +61,7 @@ function card(item) {
   const previous = picks.get(item.id);
   const chosen = choices.find(choice => choice.id === previous) || choices[0];
   if (chosen) picks.set(item.id, chosen.id);
-  const detail = create('p', 'detail', youtubePending ? 'Choose a quality to check available downloads' : unavailable ? 'Playback detected · Download unavailable' : chosen ? `${chosen.extension.toUpperCase()}${chosen.audioCodec ? ` · ${chosen.audioCodec.toUpperCase()} audio` : chosen.type === 'video' ? ' · Video only' : ' · Original audio'}${chosen.duration ? ` · ${durationLabel(chosen.duration)}` : ''}` : `${item.sources.length} source${item.sources.length === 1 ? '' : 's'} detected`);
+  const detail = create('p', 'detail', youtubePending ? 'Choose a quality to check available downloads' : unavailable ? 'Playback detected · Download unavailable' : chosen?.original ? `${chosen.extension.toUpperCase()} · Original file` : chosen ? `${chosen.extension.toUpperCase()}${chosen.audioCodec ? ` · ${chosen.audioCodec.toUpperCase()} audio` : chosen.type === 'video' ? ' · Video only' : ' · Original audio'}${chosen.duration ? ` · ${durationLabel(chosen.duration)}` : ''}` : `${item.sources.length} source${item.sources.length === 1 ? '' : 's'} detected`);
   body.append(detail);
   if (renamed.has(item.id)) {
     const filename = create('input', 'filename'); filename.value = names.get(item.id) || item.title; filename.maxLength = 140; filename.setAttribute('aria-label', 'Filename'); filename.addEventListener('input', () => names.set(item.id, filename.value)); body.append(filename);
@@ -90,6 +90,7 @@ function card(item) {
   if (unavailable) body.append(create('p', 'card-status error', unavailable));
   if (messages.has(item.id)) body.append(create('p', `card-status${busy ? '' : ' error'}`, messages.get(item.id)));
   if (inspection?.warnings?.length) body.append(create('p', 'card-status', 'Some sources could not be read. The choices above are available.'));
+  if (inspection?.notice) body.append(create('p', 'card-status', inspection.notice));
   article.append(body); return article;
 }
 

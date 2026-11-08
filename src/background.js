@@ -1,8 +1,9 @@
 import { httpUrl, mediaKind, sourceUrl, upsert, safeFilename, readableError, unavailableMessage } from './core.js';
 import { siteContext, withSiteContext } from './site-context.js';
 import { createToolbarActivity, pending } from './toolbar.js';
-import { youtubeItemId } from './youtube.js';
+import { youtubeItemId, youtubePageId } from './youtube.js';
 import { resolveYoutube, youtubePlayerRule } from './youtube-resolver.js';
+import { prepareYoutubeUrls } from './youtube-page-urls.js';
 
 const state = { tabs: {}, jobs: [], settings: { automatic: true, saveAs: false } };
 let inspection = false;
@@ -201,7 +202,14 @@ async function handle(message, sender) {
         if (!result && youtubeId) {
           let sources;
           await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [2], addRules: [youtubePlayerRule(chrome.runtime.id)] });
-          try { sources = await resolveYoutube(youtubeId); }
+          try { sources = await resolveYoutube(youtubeId, undefined, async client => {
+            await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [2], addRules: [youtubePlayerRule(chrome.runtime.id, client)] });
+          }, async (urls, timestamp) => {
+            const frameIds = Object.entries(tabState(message.tabId).frames).filter(([, url]) => youtubePageId(url) === youtubeId).map(([id]) => Number(id));
+            if (!frameIds.length) return null;
+            const results = await chrome.scripting.executeScript({ target: { tabId: message.tabId, frameIds }, world: 'MAIN', func: prepareYoutubeUrls, args: [youtubeId, urls, timestamp] });
+            return results.find(result => Array.isArray(result.result))?.result || null;
+          }); }
           finally { await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [2] }); }
           candidate = { ...item, sources };
           result = await engineMessage({ type: 'inspect', media: candidate });
@@ -210,7 +218,7 @@ async function handle(message, sender) {
         if (currentItem(message.tabId, message.itemId) !== item) throw new Error('The page changed. Choose the video again.');
         item.sources = candidate.sources;
         delete item.unavailable;
-        item.inspection = { choices: result.choices, warnings: result.warnings, at: Date.now() };
+        item.inspection = { choices: result.choices, warnings: result.warnings, notice: result.notice, at: Date.now() };
         await persist();
         return item.inspection;
       } finally { inspection = false; await requestContext(null); await release('unused'); }

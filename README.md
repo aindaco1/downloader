@@ -1,4 +1,4 @@
-# Dust Wave Downloader 0.1.10
+# Dust Wave Downloader 0.1.16
 
 An unpacked Chrome extension for saving individual videos and original audio. It detects media automatically on websites, offers the qualities it can read, and combines tracks locally when needed. No account, native companion, server, or FFmpeg installation is required.
 
@@ -23,6 +23,52 @@ The same extension folder is designed for Chrome on macOS, Windows, and Linux. B
 
 To update, pull the latest source, run `npm ci` and `npm run build`, then click **Reload** on the extension's card in `chrome://extensions` and refresh open media pages. Keep the folder in place while installed.
 
+## Changes in 0.1.16
+
+- Made-for-kids YouTube videos can now offer higher-resolution adaptive tracks through an additional public TV-player lookup. The reported film exposes **3840 × 1634 (4K)**, **2560 × 1088**, **1920 × 816**, **1280 × 544**, and **854 × 364**, alongside its original **640 × 272** choice. These are the source's widescreen dimensions; no upscaling occurs.
+- The matching open YouTube page's already-loaded URL processor prepares those tracks. The extension downloads or evaluates no player code, validates that only the URL's `n` value changed, and inspects actual media before showing choices. Video and AAC audio are combined locally.
+- If the optional lookup or page processor is unavailable, the working lower-resolution source remains available. YouTube's changing player internals can still limit this path.
+
+Reload the extension and refresh the YouTube page after updating. No permission or dependency was added.
+
+## Changes in 0.1.15
+
+- YouTube's public lookup now tries an Android player client once when the primary client reports the matching video unavailable. This handles uploads marked **made for kids**, which the primary VISIONOS client does not serve.
+- The alternate lookup retains anonymous requests, matches its headers to the selected client, and feeds available clear tracks through the existing quality picker and download engine. Account verification, HTTP refusal, mismatched video identity, live recording, and protected media remain terminal.
+- Available quality depends on the tracks returned by YouTube. The reported widescreen video now exposes a 640 × 272 H.264/AAC MP4 and AAC audio extraction; the alternate client may offer only its combined 360p-class stream.
+
+Reload the extension and refresh open YouTube tabs after updating. Google Drive original-file support from 0.1.14 is included. No permission or dependency was added.
+
+## Changes in 0.1.14
+
+- Google Drive video and audio file viewers now expose one **Original file** choice. The file is saved byte for byte in its original format, including MOV, using the browser's existing signed-in account.
+- Drive's large-file scan notice appears before downloading. Its size confirmation is handled within the download; permission denials, sign-in pages, CAPTCHA, and flagged-file warnings remain errors.
+- Long original-file transfers continue while data is arriving, with progress and cancellation through the existing Downloads view.
+
+Reload the extension and refresh open Drive tabs after updating. No permission or dependency was added.
+
+## Changes in 0.1.13
+
+- X.com master playlists, video qualities, audio playlists, and direct MP4 variants now share one card per media ID. Repeated discovery and rescans retain that card and its original source URLs.
+- X HLS initialization MP4s are excluded from discovery because they are playback metadata, not standalone downloads.
+- Different clips remain separate, including multiple videos in one post or embedded page. Previously cached duplicate cards collapse when their media is detected again.
+
+Reload the extension and refresh open media pages after updating. No permission or dependency was added.
+
+## Changes in 0.1.12
+
+- YouTube quality lookup retains one compatible stream per resolution/frame rate and its default audio, preferring AAC for MP4 playback. Duplicate codecs and automatic dubs no longer fill the source limit and exhaust inspection time on long videos.
+- YouTube file reads use bounded byte ranges to keep large downloads from slowing down on long open-ended requests. Encoded media and signed URLs are preserved.
+- Interrupted requests and inspection timeouts have distinct errors. “Cancelled” is reserved for an explicit cancellation.
+
+## Changes in 0.1.11
+
+- Substack article discovery excludes media from prefetched recommended posts. Nested media uses its own article's title and cover image, and text-to-speech audio is labeled “read aloud.”
+- The current Substack article is also read from its initial page data, so discovery does not depend on a recommendation request.
+- YouTube embeds that initially expose only a playable preview now show a video card with its title, poster, and duration. **Choose quality** uses the existing public player lookup. The article narration stays separate from the podcast video.
+
+Reload the extension and refresh open media pages after updating to clear previously detected recommendations. No permission or dependency was added.
+
 ## Changes in 0.1.10
 
 - YouTube videos that expose only SABR or ciphered playback can now offer downloadable qualities through a public player lookup. The same fallback runs when observed YouTube sources cannot be inspected.
@@ -30,7 +76,7 @@ To update, pull the latest source, run `npm ci` and `npm run build`, then click 
 - Video identity follows YouTube navigation within the same tab, so the fallback also runs when the browser reports an older document URL.
 - The reported unlisted video passed complete 1080p video-with-audio and AAC audio-only downloads in Chromium, including full decode checks and popup closure during each download.
 
-This supports public/unlisted videos when YouTube provides compatible tracks. It is not a general SABR decoder or signature decipherer. Account-only, verification-gated, protected, and live videos remain outside this fallback. YouTube can change these player interfaces; see [VALIDATION.md](VALIDATION.md) for current evidence.
+This supports public/unlisted videos when YouTube provides compatible tracks. It is not a general SABR decoder or standalone signature decipherer. Account-only, verification-gated, protected, and live videos remain outside this fallback. YouTube can change these player interfaces; see [VALIDATION.md](VALIDATION.md) for current evidence.
 
 ## Changes in 0.1.9
 
@@ -105,11 +151,14 @@ You can close the popup during a download. Keep Chrome open. One download or qua
 
 For a signed-in page, sign in normally in that Chrome profile and play the item. The extension uses browser-managed authentication and the originating page's Referer. It does not export cookies. A site's authentication, expired links, or protected player can still prevent a download.
 
-If media is missing, select the desired quality in the site's player, play it, and click **Rescan**. Not all sites expose every quality. Several cards can represent a master playlist and its individual streams; inspect the master/combined item first when available. Carousel clips remain individual items.
+For Google Drive, open the individual video or audio file, then choose **Original file** in the extension. Download access must be enabled for your account. This saves the uploaded file unchanged; preview qualities, separate audio extraction, folders, and Google Docs/Sheets/Slides export are outside this support. A Google scan-limit notice is shown for large files.
+
+If media is missing, select the desired quality in the site's player, play it, and click **Rescan**. Not all sites expose every quality. On sites without media identity support, several cards can represent a master playlist and its individual streams; inspect the master/combined item first when available. Carousel clips remain individual items.
 
 ## Formats and limits
 
 - Direct media files; finite HLS streams; clear, static DASH SegmentTemplate/SegmentTimeline/SegmentList streams.
+- Google Drive originals: MP4/M4V, MOV, WebM, MKV, MP3, M4A, AAC, Ogg/Opus, WAV, and FLAC.
 - Video/audio merging and audio extraction preserve encoded media. No transcoding, upscaling, MP3 conversion, batch downloads, playlists, or live recording.
 - AAC audio saves as M4A; MP3 stays MP3; Opus/Vorbis use Ogg; other supported codecs retain a compatible container. The selected output format is shown before download.
 - Protected media and some DASH SegmentBase layouts are unsupported. YouTube SABR/cipher-only pages use the public player fallback when compatible tracks are available. The fallback cannot access account-only or verification-gated videos, and YouTube support remains experimental.
@@ -117,7 +166,7 @@ If media is missing, select the desired quality in the site's player, play it, a
 
 ## Privacy and permissions
 
-No analytics, upload service, remote executable code, cookie export, or native component. Network requests go to the visited sites and their media/image hosts. Source URLs and detected items live in a bounded Chrome session cache; closing a tab clears its items. Closing Chrome clears the session cache. Chrome retains its normal download history. Only the two settings persist in extension local storage. On **Choose quality**, eligible YouTube videos may trigger an anonymous watch-page and player lookup. Its visitor context stays in memory for that request and is never saved in extension storage. Returned media URLs use the existing bounded session cache.
+No analytics, upload service, remote executable code, cookie export, or native component. Network requests go to the visited sites and their media/image hosts. Source URLs and detected items live in a bounded Chrome session cache; closing a tab clears its items. Closing Chrome clears the session cache. Chrome retains its normal download history. Only the two settings persist in extension local storage. On **Choose quality**, eligible YouTube videos may trigger an anonymous watch-page and player lookup. Its visitor context stays in memory for that request and is never saved in extension storage. Returned media URLs use the existing bounded session cache. Drive requests use the current browser session; its temporary download-confirmation token stays in memory for the operation.
 
 | Permission | Purpose |
 | --- | --- |
@@ -147,7 +196,11 @@ For installed-extension integration tests, install Playwright's Chromium (`npx p
 npm run fixtures
 npm run test:browser
 npm run test:youtube
+npm run test:youtube-clients
 npm run test:vimeo
+npm run test:twitter
+npm run test:drive
+npm run test:substack
 npm run test:errors
 npm run test:rescan
 npm run test:toolbar
@@ -156,7 +209,11 @@ npm run test:nonmedia
 
 For a full live YouTube check, run `YOUTUBE_TEST_URL="https://www.youtube.com/watch?v=VIDEO_ID" npm run test:youtube-live` with an authorized finite video. This saves the highest offered MP4 video and AAC audio into the test directory, checks their duration/codecs, and fully decodes both.
 
+`node tests/substack-live.mjs` checks the reported Hollywood Hang article in a disposable browser: separate narration/video cards, loaded previews, and a stable rescan. Add `INSPECT=1` to check available qualities, or `DOWNLOAD=1` to save and fully decode the narration and complete 360p episode with the popup closed. `VIDEO_HEIGHT=1080` selects the larger default quality for that download check. `CHROMIUM_EXECUTABLE` selects another Chromium browser such as Helium, and `RESULTS_DIR` separates reports.
+
 Tests generate synthetic media, load the actual unpacked extension into a disposable Chromium profile, save files into `test-results`, and independently inspect/decode them. They do not alter your normal Chrome profile. `tests/live.mjs` checks public site samples; `DOWNLOADS=1` additionally downloads selected media into `test-results/live/downloads`. Live pages change and may show account or verification gates.
+
+`MEDIA_TYPES=video npm run test:youtube-live` tests just the video output; `INSPECT_ONLY=1` checks the actual quality lookup without starting a full download. Both use `YOUTUBE_TEST_URL` and a disposable browser profile.
 
 Generated builds, synthetic fixtures, browser profiles, downloaded test media, and reports stay outside Git. Run `npm run clean` after testing to remove them; it retains `node_modules` for the next development session. If Chrome loads this repository's `extension` directory directly, rebuild before reloading the extension.
 

@@ -24,7 +24,7 @@ async function run(job) {
     reporter.stop();
     controller.signal.throwIfAborted();
     const result = await file.getFile();
-    const mime = { mp4: 'video/mp4', m4a: 'audio/x-m4a', webm: 'video/webm', mkv: 'video/x-matroska', mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav', flac: 'audio/flac' }[job.choice.extension];
+    const mime = { mp4: 'video/mp4', m4v: 'video/x-m4v', mov: 'video/quicktime', m4a: 'audio/x-m4a', webm: 'video/webm', mkv: 'video/x-matroska', mp3: 'audio/mpeg', aac: 'audio/aac', opus: 'audio/ogg', ogg: 'audio/ogg', wav: 'audio/wav', flac: 'audio/flac' }[job.choice.extension];
     blobUrl = URL.createObjectURL(result.slice(0, result.size, mime));
     completed.set(job.id, blobUrl);
     task = null;
@@ -35,7 +35,7 @@ async function run(job) {
     completed.delete(job.id);
     await (await directory).removeEntry(job.id).catch(() => {});
     task = null;
-    await notify({ id: job.id, status: controller.signal.aborted ? 'cancelled' : 'error', error: readableError(error) });
+    await notify({ id: job.id, status: controller.signal.reason?.code === 'USER_CANCELLED' ? 'cancelled' : 'error', error: readableError(controller.signal.aborted ? controller.signal.reason : error) });
   } finally { clearInterval(heartbeat); }
 }
 
@@ -50,7 +50,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       return {};
     }
     if (message.type === 'cancel') {
-      if (task?.id === message.id || message.id === 'inspect') task?.controller.abort();
+      if (task?.id === message.id || message.id === 'inspect') task?.controller.abort(Object.assign(new Error('Cancelled.'), { code: 'USER_CANCELLED' }));
       return {};
     }
     if (task) throw new Error('A media task is already running.');

@@ -1,25 +1,30 @@
 import { extractJsonMedia, youtubeMedia } from './adapters.js';
-import { youtubePageId } from './youtube.js';
+import { youtubePageId, youtubeEmbedMedia } from './youtube.js';
+import { driveMedia } from './drive.js';
 if (!window.__dustWavePage) {
 window.__dustWavePage = true;
 const CHANNEL = 'dust-wave-media-v1';
 const host = location.hostname;
+const substack = /(^|\.)substack\.com$/.test(host);
 const targeted = /(^|\.)(instagram\.com|tiktok\.com|vimeo\.com|substack\.com|youtube\.com)$/.test(host);
 const knownScripts = new WeakSet();
 const publish = items => { if (items.length) window.postMessage({ channel: CHANNEL, items }, '*'); };
-const process = data => publish(extractJsonMedia(data, { title: document.title }));
+const process = data => publish(extractJsonMedia(data, { title: document.title, pageUrl: location.href, post: substack ? window._preloads?.post : undefined }));
 function parse(text) {
   if (typeof text !== 'string' || text.length > 3000000) return false;
   try { process(JSON.parse(text.replace(/^for\s*\(;;\);\s*/, ''))); return true; } catch { return false; }
 }
 function scan() {
   try {
+    if (host === 'drive.google.com') publish(driveMedia(window.viewerData, location.href));
     if (/(^|\.)(youtube\.com|youtube-nocookie\.com)$/.test(host)) {
       const player = document.getElementById('movie_player')?.getPlayerResponse?.() || window.ytInitialPlayerResponse;
       const currentId = youtubePageId(location.href);
       if (!currentId || player?.videoDetails?.videoId === currentId) publish(youtubeMedia(player));
+      if (!player?.videoDetails) publish(youtubeEmbedMedia(window.ytcfg?.get?.('PLAYER_VARS'), location.href));
     }
     if (host.endsWith('vimeo.com') && window.playerConfig) process(window.playerConfig);
+    if (substack && window._preloads?.post) process(window._preloads.post);
     for (const script of [...document.querySelectorAll('script[type="application/json"],script[type="application/ld+json"],#__NEXT_DATA__,#__UNIVERSAL_DATA_FOR_REHYDRATION__,#SIGI_STATE')].slice(0, targeted ? 200 : 50)) {
       if (knownScripts.has(script)) continue;
       // Streaming HTML can expose a script element before its JSON is complete.

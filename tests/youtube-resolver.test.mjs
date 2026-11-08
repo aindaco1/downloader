@@ -44,7 +44,32 @@ test('format limits preserve audio and highest video qualities', () => {
   const sources = youtubeResolvedSources(player(formats), id);
   assert.equal(sources.length, MAX_SOURCES);
   assert.equal(sources[0].height, 139);
-  assert.equal(sources.filter(source => source.mime.startsWith('audio/')).length, 2);
+  assert.equal(sources.filter(source => source.mime.startsWith('audio/')).length, 1);
+});
+
+test('long multilingual videos inspect one compatible stream per quality and retain default audio', () => {
+  const formats = [];
+  for (const height of [144, 240, 360, 480, 720, 1080]) {
+    for (const [itag, codec] of [[1, 'avc1.640028'], [2, 'vp9'], [3, 'av01.0.08M.08']]) {
+      formats.push({ ...format(height + itag, `video/mp4; codecs="${codec}"`), width: height * 16 / 9, height, fps: 24 });
+    }
+  }
+  for (const language of ['es', 'fr', 'de', 'pt', 'id', 'it', 'en']) {
+    for (const [itag, codec, bitrate] of [[139, 'mp4a.40.5', 50000], [140, 'mp4a.40.2', 130000], [249, 'opus', 50000], [251, 'opus', 150000]]) {
+      formats.push({ ...format(itag, `audio/${codec === 'opus' ? 'webm' : 'mp4'}; codecs="${codec}"`), url: `https://r.googlevideo.com/videoplayback?itag=${itag}&lang=${language}`, bitrate: bitrate + (language === 'en' ? 0 : 5000), audioTrack: { id: language, audioIsDefault: language === 'en' } });
+    }
+  }
+  const sources = youtubeResolvedSources(player(formats), id);
+  assert.equal(sources.length, 7, 'six qualities and default AAC audio, rather than filling the source cap');
+  assert.deepEqual(sources.filter(source => source.mime.startsWith('video/')).map(source => source.height), [1080, 720, 480, 360, 240, 144]);
+  assert.ok(sources.filter(source => source.mime.startsWith('video/')).every(source => source.mime.includes('avc1')));
+  const audio = sources.filter(source => source.mime.startsWith('audio/'));
+  assert.ok(audio.every(source => new URL(source.url).searchParams.get('lang') === 'en'));
+  assert.deepEqual(audio.map(source => new URL(source.url).searchParams.get('itag')), ['140']);
+  const onlyNewCodec = youtubeResolvedSources(player([{ ...format(), mimeType: 'video/mp4; codecs="av01.0.12M.08"', height: 2160 }]), id);
+  assert.equal(onlyNewCodec[0].height, 2160, 'a resolution without H.264 remains available');
+  const onlyOpus = youtubeResolvedSources(player([format(249, 'audio/webm; codecs="opus"')]), id);
+  assert.equal(onlyOpus.length, 1, 'audio without AAC remains available');
 });
 
 test('public lookup uses fresh visitor context and omits credentials in both requests', async t => {
@@ -78,6 +103,42 @@ test('lookup denial is not retried or converted to sign-in advice', async t => {
     return true;
   });
   assert.equal(attempts, 1);
+});
+
+test('an unavailable matching VISIONOS video gets one anonymous Android lookup with a matching request identity', async t => {
+  const requests = []; const prepared = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    requests.push({ url, ...options });
+    if (requests.length === 1) return new Response(JSON.stringify({ visitorData: visitor }));
+    if (requests.length === 2) return new Response(JSON.stringify({ playabilityStatus: { status: 'UNPLAYABLE', reason: 'This video is not available' }, videoDetails: { videoId: id } }));
+    return new Response(JSON.stringify({ ...player([]), streamingData: { formats: [{ ...format(18, 'video/mp4; codecs="avc1.42001E, mp4a.40.2"'), height: 360, width: 640 }] } }));
+  });
+  const sources = await resolveYoutube(id, undefined, async name => prepared.push(name));
+  assert.deepEqual(prepared, ['visionos', 'android']); assert.equal(requests.length, 3);
+  assert.ok(requests.every(request => request.credentials === 'omit' && request.redirect === 'error'));
+  const android = JSON.parse(requests[2].body);
+  assert.equal(android.videoId, id); assert.equal(android.context.client.clientName, 'ANDROID');
+  assert.equal(requests[2].headers['X-YouTube-Client-Name'], '3');
+  assert.equal(requests[2].headers['X-YouTube-Client-Version'], android.context.client.clientVersion);
+  assert.equal(android.context.client.visitorData, visitor); assert.equal(android.contentCheckOk, undefined);
+  assert.equal(youtubePlayerRule('extension-id', 'android').action.requestHeaders.find(header => header.header === 'User-Agent').value, android.context.client.userAgent);
+  assert.equal(sources.length, 1); assert.equal(sources[0].height, 360); assert.match(sources[0].mime, /mp4a/);
+});
+
+test('the alternate client does not retry account, mismatched, live, protected or repeated unavailable responses', async t => {
+  const cases = [
+    { playabilityStatus: { status: 'LOGIN_REQUIRED' }, videoDetails: { videoId: id } },
+    { playabilityStatus: { status: 'UNPLAYABLE' }, videoDetails: { videoId: 'differentid' } },
+    { playabilityStatus: { status: 'UNPLAYABLE' }, videoDetails: { videoId: id, isLive: true } },
+    { playabilityStatus: { status: 'UNPLAYABLE' }, videoDetails: { videoId: id }, streamingData: { drmFamilies: ['WIDEVINE'] } },
+  ];
+  let reply; let calls;
+  t.mock.method(globalThis, 'fetch', async () => { calls++; return new Response(JSON.stringify(calls === 1 ? { visitorData: visitor } : reply)); });
+  for (const candidate of cases) {
+    calls = 0; reply = candidate; await assert.rejects(resolveYoutube(id)); assert.equal(calls, 2);
+  }
+  calls = 0; reply = { playabilityStatus: { status: 'UNPLAYABLE' }, videoDetails: { videoId: id } };
+  await assert.rejects(resolveYoutube(id), /did not make this video available/); assert.equal(calls, 3);
 });
 
 test('response size limits cancel reading before parsing oversized manifests or player data', async () => {

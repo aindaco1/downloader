@@ -6,6 +6,7 @@ await mkdir(dir, { recursive: true });
 function ffmpeg(args) { execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args], { stdio: 'pipe' }); }
 ffmpeg(['-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=24', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '6', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-g', '24', '-c:a', 'aac', '-movflags', '+faststart', `${dir}/combined.mp4`]);
 ffmpeg(['-i', `${dir}/combined.mp4`, '-map', '0:v', '-c', 'copy', `${dir}/video.mp4`]);
+ffmpeg(['-i', `${dir}/combined.mp4`, '-c', 'copy', '-f', 'mov', `${dir}/drive-original.mov`]);
 ffmpeg(['-i', `${dir}/combined.mp4`, '-map', '0:v', '-c', 'copy', '-movflags', '+faststart', `${dir}/video-faststart.mp4`]);
 ffmpeg(['-i', `${dir}/combined.mp4`, '-map', '0:a', '-c', 'copy', `${dir}/audio.m4a`]);
 ffmpeg(['-i', `${dir}/combined.mp4`, '-vf', 'scale=320:180', '-c:v', 'libx264', '-g', '24', '-c:a', 'copy', '-movflags', '+faststart', `${dir}/low.mp4`]);

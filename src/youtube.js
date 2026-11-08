@@ -19,6 +19,16 @@ export function isYoutubeMedia(value) {
   return /(^|\.)(googlevideo\.com|youtube\.com|youtube-nocookie\.com)$/.test(new URL(safe).hostname);
 }
 export const youtubeThumbnail = id => validYoutubeId(id) ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null;
+export function youtubeEmbedMedia(config, pageUrl) {
+  const id = youtubePageId(pageUrl);
+  if (!id || config?.video_id !== id || typeof config.embedded_player_response !== 'string' || config.embedded_player_response.length > 3000000) return [];
+  let response;
+  try { response = JSON.parse(config.embedded_player_response); } catch { return []; }
+  const preview = response?.embedPreview?.thumbnailPreviewRenderer;
+  if (response?.previewPlayabilityStatus?.status !== 'OK' || preview?.playButton?.buttonRenderer?.navigationEndpoint?.watchEndpoint?.videoId !== id) return [];
+  const title = preview.title?.simpleText || preview.title?.runs?.map(run => run.text || '').join('');
+  return [{ key: `youtube:${id}`, title, thumbnail: youtubeThumbnail(id), duration: Number(preview.videoDurationSeconds), rank: 3, sources: [], unavailable: 'youtube-preview' }];
+}
 export function youtubeContext(pageUrl, metadata = {}) {
   const page = httpUrl(pageUrl);
   if (!page || !/(^|\.)(youtube\.com|youtube-nocookie\.com|youtu\.be)$/.test(new URL(page).hostname)) return {};
